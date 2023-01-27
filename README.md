@@ -1,1 +1,1 @@
-# Omicron---Sheffield
+# Omicron-Sheffield
