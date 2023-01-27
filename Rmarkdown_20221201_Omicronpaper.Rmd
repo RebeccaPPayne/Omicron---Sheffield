@@ -1,0 +1,247 @@
+---
+title: "NU tet pos omicron analysis - hetero and homo responses - Sheffield"
+author: "Rebecca Payne"
+date: "14/11/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+Analysis of antigen specific responses from nine batches. Samples are either stained for EBV, CMV, or Spike/non Spike pentamer responses. Pre-gated fcs files on live, CD8+ tetramer positive cells. Cut-off greater than 0.01% response applied
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include=FALSE}
+library(readxl) 
+library(CATALYST)
+library(cowplot)
+library(flowCore)
+library(scater)
+library(SingleCellExperiment)
+library(openxlsx)
+library(diffcyt)
+library(ggpubr)
+```
+
+
+
+Load  FCS files (processed), metadata, panel and create flowset
+
+```{r}
+md <- "metadata_aurora_sheffield.xlsx" 
+md <- read_excel(md)       
+head(data.frame(md)) 
+```
+
+
+```{r message=FALSE}
+fs <- read.flowSet(md$file_name, transformation = F, truncate_max_range = F)
+```
+
+```{r}
+panel <- "Panel_aurora_sheffield.xlsx" 
+panel <- read_excel(panel)                                         
+head(data.frame(panel),30) 
+```
+
+
+```{r}
+all(panel$fcs_colname %in% colnames(fs))
+```
+
+```{r}
+setdiff(fs@frames$CD8_Tet2_RPP_APC_3108_V7.fcs@parameters@data$desc,panel$antigen)
+```
+
+
+```{r}
+md$infection <- factor(md$infection, levels = c("pre_omicron", "post_omicron"))
+
+md$batch <- factor(md$batch, levels = c("3", "4", "5", "6","7", "8", "9"))
+
+md$antigen <- factor(md$antigen, levels = c("spike", "nonspike", "EBV", "CMV" ))
+
+md$hla <- factor(md$hla, levels = c("B5701", "A0201", "A0301", "B0702", "A0101"))
+
+md$serostatus <- factor(md$serostatus, levels = c("naive", "conv"))
+
+
+
+
+
+md$condition <- factor(md$condition, levels = c("pre_omicron_spike_naive", "post_omicron_spike_naive", "pre_omicron_spike_previously_infected", "post_omicron_spike_previously_infected", "post_omicron_nonspike_naive", "pre_omicron_nonspike_previously_infected", "post_omicron_nonspike_previously_infected", "pre_omicron_EBV", "post_omicron_EBV", "pre_omicron_CMV", "post_omicron_CMV"))
+
+md$sample_id <- factor(md$sample_id, levels = md$sample_id[order(md$condition)])
+
+
+```
+
+
+```{asis, echo = TRUE}
+# see ?prepdata for notes on the sce. Aurora flow analysis needs a different cofactor applied. We have chosen 150. Also need to specify FACE = TRUE for flow data.
+```
+
+```{r}
+sce <- prepData(fs, panel, md, transform = TRUE, cofactor = 150, FACS = TRUE, features = panel$fcs_colname, md_cols = list(file = "file_name", id = "sample_id", factors = c("batch", "condition", "antigen", "hla", "serostatus", "infection")))
+
+```
+
+
+
+## Overview analysis of Cytof data
+
+```{r}
+n_cells(sce)
+```
+
+```{r fig.width= 10}
+plotCounts(sce, color_by = "antigen")
+```
+
+
+
+```{r fig.width= 5}
+plotNRS(sce, features = type_markers(sce), color_by = "condition")
+
+```
+
+
+## Clustering of fcs files with over 0.01% of CD8 (or more than 20 events) tetramer positive events  
+
+
+### sce_all : Cluster of sce on type AND state markers; using features = NULL
+Cluster FLOWSom analysis - max 10 clusters <br/> cluster on "type" markers for memory phenotyping
+
+For reproducibility set random seed
+```{r}
+set.seed(4321)
+sce_all <- cluster(sce, features = NULL, 
+               xdim = 10, ydim = 10, maxK = 10, 
+               verbose = FALSE, seed = 4321) 
+```
+
+
+```{r fig.width=5}
+pbMDS(sce_all, shape_by = "antigen", size_by = TRUE, label_by = NULL)
+```
+
+## Dimension reduction - UMAP
+```{r}
+set.seed(4321)
+sce_all <- runDR(sce_all, dr = "UMAP", cells = 500, features = NULL)
+```
+
+```{r}
+plotDR(sce_all, "UMAP", color_by = "meta10")
+
+```
+
+
+
+
+
+## 28.11.2022 Group data in sce_all into three groups
+
+## group_a - pre_omicron - only pre_omicron samples 
+## group_b - spike only samples
+## group_c - nonspike only 
+
+```{r}
+sce_all_groupa <- filterSCE(sce_all, infection == "pre_omicron")
+```
+
+
+```{r}
+sce_all_groupb <- filterSCE(sce_all, antigen == "spike")
+```
+
+
+```{r}
+sce_all_groupc <- filterSCE(sce_all, antigen == "nonspike")
+```
+
+## Plots of UMAP based on FLowSOM clustering and DR on sce_all (all markers inc type and state)
+
+```{r}
+plotDR(sce_all, "UMAP", color_by = "condition")
+
+```
+
+
+```{r}
+plotDR(sce_all_groupa, "UMAP", color_by = "condition")
+
+```
+
+```{r}
+plotDR(sce_all_groupb, "UMAP", color_by = "condition")
+
+```
+
+```{r}
+plotDR(sce_all_groupc, "UMAP", color_by = "condition")
+
+```
+## Heatmaps
+
+
+```{r fig.width=7, fig.height=5}
+plotExprHeatmap(sce_all, features = NULL, 
+    scale = "last", q = 0, bars = FALSE, row_anno = c("condition", "hla"), row_clust = FALSE)
+```
+
+
+```{r fig.width=7, fig.height=5}
+plotExprHeatmap(sce_all_groupa, features = NULL, 
+    scale = "last", q = 0, bars = FALSE, row_anno = c("condition", "hla"), row_clust = FALSE)
+```
+
+```{r fig.width=7, fig.height=5}
+plotExprHeatmap(sce_all_groupb, features = NULL, 
+    scale = "last", q = 0, bars = FALSE, row_anno = c("condition", "hla"), row_clust = FALSE)
+```
+
+```{r fig.width=7, fig.height=5}
+plotExprHeatmap(sce_all_groupc, features = NULL, 
+    scale = "last", q = 0, bars = FALSE, row_anno = c("condition", "hla"), row_clust = FALSE)
+```
+
+# Marker expression 
+
+
+
+```{r fig.height=8}
+plotPbExprs(sce_all_groupa, features=NULL, facet_by = "antigen", ncol = 3) + stat_compare_means(label.y = -3) + stat_compare_means(method = "t.test", ref.group = ".all.")
+```
+
+```{r fig.height=3}
+plotPbExprs(sce_all_groupa, features=NULL, facet_by = "antigen", ncol = 3)
+```
+
+```{r fig.height=8}
+plotPbExprs(sce_all_groupb, features=NULL, facet_by = "antigen", ncol = 3 ) + stat_compare_means(label.y = -3) + stat_compare_means(method = "t.test", ref.group = ".all.")
+```
+
+
+```{r fig.height=3}
+plotPbExprs(sce_all_groupb, features=NULL, facet_by = "antigen", ncol = 3 ) 
+```
+
+```{r fig.height=8}
+plotPbExprs(sce_all_groupc, features=NULL, facet_by = "antigen", ncol = 3) + stat_compare_means(label.y = -3) + stat_compare_means(method = "t.test", ref.group = ".all.", label="p.signif")
+```
+
+```{r fig.height=3}
+plotPbExprs(sce_all_groupc, features=NULL, facet_by = "antigen", ncol = 3) 
+```
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
